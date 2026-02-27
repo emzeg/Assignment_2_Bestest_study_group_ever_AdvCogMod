@@ -10,13 +10,83 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #load packages
 ```{r}
+pacman::p_load(
+  tidyverse,    # Data manipulation and plotting
+  here,         # Robust file paths
+  cmdstanr,     # Stan interface
+  posterior,    # Posterior analysis
+  bayesplot,    # Plotting MCMC
+  furrr,        # Parallel processing
+  future        # Future backend
+)
 
+# Parallel Setup: Leave 2 cores free for system stability
+n_cores <- parallel::detectCores() - 2
+plan(multisession, workers = n_cores)
+
+# Optional: Set a default ggplot theme
+theme_set(theme_classic())
 ```
 
-#create data
+#create the data
 ```{r}
+trials <- 120 # Number of trials per simulated agent
 
+# Define the agent function (copied from previosu chapter)
+# need to include prevchoice and feedback but also noise
+WSLSAgent_noise_f <- function(prevChoice, feedback, noise){
+  if (feedback == 1){
+    choice = prevChoice
+  } else if (feedback == 0){
+    choice = (1 - prevChoice)
+  }
+  
+  if (noise > 0 && rbinom(1, 1, noise) == 1) { #if noise, override with 50/50
+    choice <- rbinom(1, 1, 0.5)
+  }
+  return(choice)
+}
 ```
+
+#create the data 2 (unfinished)
+```{r}
+sim_data_dir <- "simdata"
+sim_data_file <- here(sim_data_dir, "04_WSLS_noise.csv")
+
+if (regenerate_simulations || !file.exists(sim_data_file)) {
+  cat("Generating new simulation data...\n")
+  # Use expand_grid for cleaner parameter combinations
+  param_grid <- expand_grid(
+    noise = seq(0, 0.5, 0.1) # Noise levels
+  )
+
+  # Use map_dfr for efficient simulation across parameters
+  d <- pmap_dfr(param_grid, function(noise, rate) {
+    # Simulate choices for one agent/condition
+    choices <- map_int(1:trials, ~WSLSAgent_noise_f(qlogis(rate), noise)) # Convert rate to log-odds for function if needed
+    # Create tibble for this condition
+    tibble(
+      trial = 1:trials,
+      choice = choices,
+      true_rate = rate, # Store the true rate used for generation
+      true_noise = noise # Store the true noise used
+    )
+  }) %>%
+  # Calculate cumulative rate for visualization
+  group_by(true_rate, true_noise) %>%
+  mutate(cumulative_rate = cumsum(choice) / row_number()) %>%
+  ungroup()
+
+  # Save the generated data
+  write_csv(d, sim_data_file)
+  cat("Generated new simulation data and saved to", sim_data_file, "\n")
+} else {
+  # Load existing simulation data
+  d <- read_csv(sim_data_file)
+  cat("Loaded existing simulation data from", sim_data_file, "\n")
+}
+```
+
 
 #call the model
 ```{r}

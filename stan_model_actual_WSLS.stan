@@ -37,8 +37,8 @@ generated quantities {
   int<lower=0, upper=n> prior_preds;
   int<lower=0, upper=n> posterior_preds;
   
-  ws= inv_logit(normal_rng(0,1));
-  ws= inv_logit(win_stay_chance)
+  ws_prior= inv_logit(normal_rng(0,1));
+  ws_posterior= inv_logit(win_stay_chance)
   
   prior_preds= binomial_rng(n, ws_prior); // n is the n of trials
   posterior_preds= binomial_rng(n, inv_logit(win_stay_chance));
