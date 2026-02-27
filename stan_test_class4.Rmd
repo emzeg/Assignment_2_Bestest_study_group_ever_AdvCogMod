@@ -54,7 +54,7 @@ RandomAgent_f <- function(rate){
 }
 ```
 
-#create the data 2 (WSLS model for simulation)
+#create the data 2 (WSLS function for simulation)
 ```{r}
 #simulate the wsls agent separately (to have the feedback and such)
 Simulate_WSLS_agent_noise_f <- function(noise, opponent, trials = 120) {
@@ -76,7 +76,7 @@ Simulate_WSLS_agent_noise_f <- function(noise, opponent, trials = 120) {
       choices[t] <- WSLSAgent_noise_f(choices[t - 1], feedback, noise)
       #cat(feedback, "(feedback) is this making sense?", choices[t-1], "is prevchoice,", opponent[t-1], "is prev_opponent\n")
       }
-    return (choices) #return only one choice (this is mapped to run 120 times)
+    return (choices)
 }
 ```
 
@@ -108,13 +108,15 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
   # Create tibble for this condition
   tibble(
     trial = 1:trials,
-    choice = choices,
-    true_noise = noise
+    WSLS_choice = choices,
+    true_noise = noise,
+    opponent_choices = opponent, #so we can compare it to the opponent's choices
   )
 }) %>%
   # Calculate cumulative rate for visualization
   group_by(true_noise) %>%
-  mutate(cumulative_rate = cumsum(choice) / row_number()) %>% #cumulative rat of choosing right
+  mutate(cumulative_rate_WSLS = cumsum(WSLS_choice) / row_number()) %>% #cumulative rat of choosing right
+  mutate(cumulative_rate_opponent= cumsum(opponent_choices) / row_number()) %>%
   ungroup()
 
   # Save the generated data
@@ -133,23 +135,23 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
 ```{r}
 # --- Visualize Simulated Data ---
 # Plot cumulative rate, faceted by noise level
-p1 <- ggplot(d, aes(x = trial, y = cumulative_rate)) +
+p1 <- ggplot(d, aes(x = trial, y = cumulative_rate_WSLS, color = "Rate WSLS")) +
   geom_line(alpha = 0.8) +
+  geom_line(aes(y=cumulative_rate_opponent, color = "Rate Opponent (Random 0.5)")) + 
   geom_hline(yintercept = 0.5, linetype = "dashed") +
-  scale_color_viridis_c() + # Use perceptually uniform color scale
+  scale_color_viridis_d() + # Use perceptually uniform color scale (non continuous)
   facet_wrap(~paste("Noise =", true_noise)) + # Facet by noise level
   labs(
-    title = "Simulated Choice Behavior (Cumulative Rate)",
-    subtitle = "Agents with different bias rates and noise levels",
+    title = "Simulated Choice Behavior of WSLS (Cumulative Rate)",
+    subtitle = "WSLS Agents with different bias rates and noise levels",
     x = "Trial Number",
-    y = "Cumulative Proportion Choosing 'Right'"
+    y = "Cumulative Proportion Choosing 'Right'",
+    color = "Players"
   ) +
   theme_minimal() +
   ylim(0, 1)
 
 print(p1)
-
-#right now never picks right? odd
 ```
 
 
