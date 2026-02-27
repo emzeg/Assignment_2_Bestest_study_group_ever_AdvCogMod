@@ -46,12 +46,47 @@ WSLSAgent_noise_f <- function(prevChoice, feedback, noise){
   }
   return(choice)
 }
+
+RandomAgent_f <- function(rate){
+  choice <- rbinom(1, 1, rate)
+  return(choice)
+}
 ```
 
 #create the data 2 (unfinished)
 ```{r}
+#simulate the wsls agent separately (to have the feedback and such)
+Simulate_WSLS_agent_noise_f <- function(noise, opponent, trials = 120) {
+  choices  <- integer(trials)
+  feedback <- integer(trials)
+  
+  #first is random
+  choices[1] <- rbinom(1, 1, 0.5)
+
+  for (t in 2:trials) {
+      #get feedback from the opponent
+      if (opponent[t-1] == choices[t-1]) {
+        feedback = 1
+      } else {
+        feedback = 0
+      }
+      #use the single function to generate data
+      choices[t] <- WSLSAgent_noise_f(choices[t - 1], feedback, noise) #prevChoice, feedback, noise
+      #print(feedback)
+    }
+    
+    return (choices[t]) #return only one choice (this is mapped to run 120 times)
+}
+```
+
+
+```{r}
 sim_data_dir <- "simdata"
 sim_data_file <- here(sim_data_dir, "04_WSLS_noise.csv")
+
+# Flag to control whether to regenerate simulation/fitting results for the knitted files
+# Set to TRUE to rerun everything (takes time!), FALSE to load saved results
+regenerate_simulations <- TRUE # Or TRUE
 
 if (regenerate_simulations || !file.exists(sim_data_file)) {
   cat("Generating new simulation data...\n")
@@ -59,21 +94,23 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
   param_grid <- expand_grid(
     noise = seq(0, 0.5, 0.1) # Noise levels
   )
+  
+  #WSLS needs an opponent (random)
+  opponent <- map_int(1:trials, ~RandomAgent_f(rate = 0.5))
 
   # Use map_dfr for efficient simulation across parameters
-  d <- pmap_dfr(param_grid, function(noise, rate) {
+  d <- pmap_dfr(param_grid, function(noise) {
     # Simulate choices for one agent/condition
-    choices <- map_int(1:trials, ~WSLSAgent_noise_f(qlogis(rate), noise)) # Convert rate to log-odds for function if needed
+    choices <- map_int(1:trials, ~Simulate_WSLS_agent_noise_f(noise, opponent, trials)) # Convert rate to log-odds for function if needed
     # Create tibble for this condition
     tibble(
       trial = 1:trials,
       choice = choices,
-      true_rate = rate, # Store the true rate used for generation
       true_noise = noise # Store the true noise used
     )
   }) %>%
   # Calculate cumulative rate for visualization
-  group_by(true_rate, true_noise) %>%
+  group_by(true_noise) %>%
   mutate(cumulative_rate = cumsum(choice) / row_number()) %>%
   ungroup()
 
@@ -85,6 +122,26 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
   d <- read_csv(sim_data_file)
   cat("Loaded existing simulation data from", sim_data_file, "\n")
 }
+```
+```{r}
+# --- Visualize Simulated Data ---
+# Plot cumulative rate, faceted by noise level
+p1 <- ggplot(d, aes(x = trial, y = cumulative_rate)) +
+  geom_line(alpha = 0.8) +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  scale_color_viridis_c() + # Use perceptually uniform color scale
+  facet_wrap(~paste("Noise =", true_noise)) + # Facet by noise level
+  labs(
+    title = "Simulated Choice Behavior (Cumulative Rate)",
+    subtitle = "Agents with different bias rates and noise levels",
+    x = "Trial Number",
+    y = "Cumulative Proportion Choosing 'Right'",
+    color = "True Bias Rate"
+  ) +
+  theme_minimal() +
+  ylim(0, 1)
+
+print(p1)
 ```
 
 
