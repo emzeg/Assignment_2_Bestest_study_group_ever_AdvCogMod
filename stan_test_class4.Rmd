@@ -1,0 +1,25 @@
+---
+title: "stan_first"
+output: html_document
+date: "2026-02-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load packages
+```{r}
+
+```
+
+#create data
+```{r}
+
+```
+
+#call the model
+```{r}
+
+```
+
