@@ -29,7 +29,7 @@ model {
   target += bernoulli_lpmf(h | win_stay_chance);
 }
 
-#the last bit, for getting the posteriors etc
+//    the last bit, for getting the posteriors etc
 generated quantities {
   real<lower=0, upper=1> ws_prior;
   real<lower=0, upper=1> ws_posterior;
@@ -38,9 +38,9 @@ generated quantities {
   int<lower=0, upper=n> posterior_preds;
   
   ws_prior= inv_logit(normal_rng(0,1));
-  ws_posterior= inv_logit(win_stay_chance)
+  ws_posterior= inv_logit(win_stay_chance);
   
-  prior_preds= binomial_rng(n, ws_prior); // n is the n of trials
+  prior_preds= binomial_rng(n, ws_prior);// n is the n of trials
   posterior_preds= binomial_rng(n, inv_logit(win_stay_chance));
 }
 
