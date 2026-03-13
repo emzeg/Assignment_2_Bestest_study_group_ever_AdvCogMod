@@ -16,7 +16,7 @@ data {
 }
 
 // The parameters accepted by the model.
-// WSLS would require 2 parameters or 1 symmetrical param (win_stay?)
+// WSLS would require 2 parameters or 1 symmetrical param (win_stay?), introduce feedback
 parameters {
   real<lower=0, upper=0.5> win_stay_chance;
 }
@@ -26,6 +26,7 @@ parameters {
 // and standard deviation 'sigma'.
 model {
   target += beta_lpdf(win_stay_chance | 1,1);
+  // theta prob(stay if won, otherwise 1-stay)
   target += bernoulli_lpmf(h | win_stay_chance);
 }
 
