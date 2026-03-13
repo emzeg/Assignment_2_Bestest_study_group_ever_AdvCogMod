@@ -12,7 +12,8 @@ set.seed(1234)
 #load packages
 ```{r}
 pacman::p_load(
-  tidyverse,    # Data manipulation and plotting
+  tidyverse, # Data manipulation and plotting
+  dplyr,
   here,         # Robust file paths
   cmdstanr,     # Stan interface
   posterior,    # Posterior analysis
@@ -213,34 +214,80 @@ if (regenerate_simulations || !file.exists(model_file_bernoulli)) {
 
 ```
 
-
 #Health checks of the model
 ```{r}
-# 1. Check for Divergent Transitions
-diagnostics <- fit_bernoulli$diagnostic_summary() 
-cat("Divergent transitions per chain:", paste(diagnostics$num_divergent, collapse = ", "), "\n")
+# Extract the summary and diagnostics from our fitted model object
+fit_summary <- fit_bernoulli$summary()
+diagnostic_summary <- fit_bernoulli$diagnostic_summary()
+
+print(diagnostic_summary)
 ```
 
 ```{r}
-# 2. Check R-hat and ESS metrics
-fit_summary <- fit_bernoulli$summary()#riccardos code specify for theta but ours doesnt have theta, is there a reason for this?
-print(fit_summary %>% 
-        select(mean, rhat, ess_bulk, ess_tail))
+# 1. Check for Divergent Transitions (Zero Tolerance)
+divergences <- sum(diagnostic_summary$num_divergent)
+if (divergences > 0) {
+  stop(paste("CRITICAL FAILURE:", divergences, "divergences detected. The posterior geometry is pathological. Reparameterization required. Do not interpret these results."))
+}
+
+print(divergences)
 ```
+
 ```{r}
-# 3. Visual Checks (Trace and Rank Plots)
-draws_df <- as_draws_df(fit_bernoulli$draws())
+# 2. Check E-BFMI (Energy-Bayesian Fraction of Missing Information)
+# Threshold is typically 0.3. Values below this indicate poor exploration.
+min_ebfmi <- min(diagnostic_summary$ebfmi)
+if (min_ebfmi < 0.3) {
+  warning(paste("WARNING: Low E-BFMI detected (Min =", round(min_ebfmi, 3), 
+                "). The sampler may struggle to explore the tails of the posterior."))
+}
 
-# A healthy trace plot is well-mixed with no wandering
-p_trace <- mcmc_trace(draws_df, pars = "theta") + 
-  theme_classic() + 
-  ggtitle("Trace Plot: Well-mixed chains")
-
-# A healthy rank histogram has uniform bars across all chains
-p_rank <- mcmc_rank_hist(draws_df, pars = "theta") + 
-  theme_classic() + 
-  ggtitle("Rank Histogram: Chains explored the same space")
-
-p_trace / p_rank
+print(min_ebfmi)
 ```
+
+```{r}
+# 3. Check for Convergence (Rhat < 1.01)
+max_rhat <- max(fit_summary$rhat, na.rm = TRUE)
+if (max_rhat > 1.01) {
+  stop(paste("CRITICAL FAILURE: Chains did not converge. Max Rhat =", round(max_rhat, 3)))
+}
+
+print(max_rhat)
+```
+
+```{r}
+# 4. Check Effective Sample Size (ESS > 400 for both bulk and tail)
+min_ess_bulk <- min(fit_summary$ess_bulk, na.rm = TRUE)
+min_ess_tail <- min(fit_summary$ess_tail, na.rm = TRUE)
+if (min_ess_bulk < 400 || min_ess_tail < 400) {
+  warning("WARNING: Insufficient Effective Sample Size. Autocorrelation is too high. Run longer chains.")
+}
+
+print(min_ess_bulk)
+print(min_ess_tail)
+```
+
+#prior predictive checks
+```{r}
+# Extract the summary statistic calculated from prior predictive simulations
+# 'prior_rep_sum' was calculated within the generated quantities block
+draws_gq <- as_draws_df(fit_bernoulli$draws()) # Ensure we have the draws as a dataframe
+observed_sum <- sum(data_for_stan$h) # Total number of 'right' choices in the actual observed data
+
+ppc_prior_ggplot <- ggplot(draws_gq, aes(x = prior_rep_sum)) +
+  # Draw the histogram of the model's prior predictions (light red)
+  geom_histogram(fill = "#ffbaba", color = "#ff5252", bins = 30, alpha = 0.8) +
+  
+  # Add the vertical line for the actual observed data (dark red)
+  geom_vline(xintercept = observed_sum, color = "darkred", linewidth = 1.2) +
+  
+  # Labels and theming
+  ggtitle("Prior Predictive Check: Total 'Right' Choices") +
+  xlab(paste("Total Number of 'Right' Choices (out of", trials, "trials)")) +
+  ylab("Frequency") +
+  theme_classic()
+
+ppc_prior_ggplot
+```
+
 
