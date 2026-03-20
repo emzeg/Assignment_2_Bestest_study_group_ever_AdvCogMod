@@ -1,0 +1,34 @@
+---
+title: "extra_ppc"
+output: html_document
+date: "2026-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pacman::p_load(
+  tidyverse, # Data manipulation and plotting
+  dplyr,
+  here,         # Robust file paths
+  cmdstanr,     # Stan interface
+  posterior,    # Posterior analysis
+  bayesplot,    # Plotting MCMC
+  furrr,        # Parallel processing
+  future        # Future backend
+)
+
+# Parallel Setup: Leave 2 cores free for system stability
+n_cores <- parallel::detectCores() - 2
+plan(multisession, workers = n_cores)
+
+# Optional: Set a default ggplot theme
+theme_set(theme_classic())
+```
+
+```{r}
+
+```
+

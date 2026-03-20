@@ -4,6 +4,8 @@ output: html_document
 date: "2026-02-27"
 ---
 
+#might need to change the simulation to match the model more (currently noise-based, with no WSLS values)
+#need to add WSLS probs (win_stay, lose_shift)
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -36,13 +38,13 @@ theme_set(theme_classic())
 trials <- 120 # Number of trials per simulated agent
 
 # Define the agent function (copied from previous chapter)
-# need to include prevchoice and feedback but also noise
-WSLSAgent_noise_f <- function(prevChoice, feedback, noise){
-  if (feedback == 1){
+WSLSAgent_noise_f <- function(prevChoice, feedback, noise, win_stay = 0.7, lose_shift = 0.9){
+  #win_stay and lose_shift
+  if (feedback == 1 && runif(1) < win_stay) {
     choice = prevChoice
-  } else if (feedback == 0){
-    choice = (1 - prevChoice)
-  }
+  } else {
+    choice <- ifelse(runif(1) < lose_shift, 1 - prevChoice, prevChoice) #if not win, do this
+    }
   
   if (noise > 0 && rbinom(1, 1, noise) == 1) { #if noise, override with 50/50
     choice <- rbinom(1, 1, 0.5)
@@ -321,7 +323,6 @@ ppc_posterior_ggplot <- ggplot(ppc_df, aes(x = Replicated_Sum)) +
 
 ppc_posterior_ggplot
 ```
-#extreme right/left values because WSLS tends to stay a bunch or shift a bunch (depending on the value of the win_stay and lose_shift) --> trends towards extremes
 ```{r}
 ppc_overlay_df <- tibble(
   Replicated_Sum = c(prior_rep_sums, post_rep_sums),
@@ -415,8 +416,51 @@ p_ppc_max_run <- ggplot(ppc_run_df, aes(x = Replicated_Max_Run, fill = Distribut
   )
 
 print(p_ppc_max_run)
+#has learned?
 ```
+#More prior & posterior checks (now for each val, for win_stay and lose_shift)
+
+#WinSTAY
 ```{r}
-mean(data_for_stan$h)
+#prior & posteriors again
+ws_prior <- fit_bernoulli$draws("ws_prior", format = "matrix")
+ws_posterior <- fit_bernoulli$draws("win_stay", format = "matrix")
+#get the real winstay (in this case known, and only one val)
+win_stay_real = 0.7
+
+ppc_winstay <- tibble(
+  Win_stay = c(ws_prior, ws_posterior),
+  Distribution = factor(
+    rep(c("Prior Predictive", "Posterior Predictive"), each = length(ws_prior)),
+    levels = c("Prior Predictive", "Posterior Predictive")
+  )
+)
+
+# 2. Generate the overlay plot
+ggplot(ppc_winstay, aes(x = Win_stay, fill = Distribution)) +
+  # Use position = "identity" and alpha to ensure both distributions are visible
+  geom_histogram(position = "identity", alpha = 0.6, color = "white", bins = 30) +
+  geom_vline(xintercept = win_stay_real, color = "black", linetype = "dashed", linewidth = 1) +
+  scale_fill_manual(values = c("Prior Predictive" = "#ffbaba", "Posterior Predictive" = "skyblue")) +
+  ggtitle("Win_Stay: Prior vs. Posterior Predictive Checks") +
+  xlab(paste("Win_stay prior & posterior compared")) +
+  #ylab("Frequency (Replicated Datasets)") +
+  # Add annotation for the empirical ground truth +
+  theme_classic() +
+  theme(
+    legend.position = "bottom", 
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12)
+  ) +
+  annotate(
+    "text",
+    x = win_stay_real,
+    y = Inf,
+    label = "Empirical Win_stay",
+    vjust = 2,
+    hjust = -0.1,
+    size = 4,
+    fontface = "bold"
+  )
 ```
 
