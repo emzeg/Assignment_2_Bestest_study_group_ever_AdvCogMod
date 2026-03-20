@@ -268,23 +268,21 @@ print(min_ess_tail)
 ```{r}
 # Extract the summary statistic calculated from prior predictive simulations
 # 'prior_rep_sum' was calculated within the generated quantities block
-draws_gq <- as_draws_df(fit_bernoulli$draws()) # Ensure we have the draws as a dataframe
-observed_sum <- sum(data_for_stan$h) # Total number of 'right' choices in the actual observed data
+h_prior_rep  <- fit_bernoulli$draws("prior_preds", format = "matrix")
+prior_rep_sums <- rowSums(h_prior_rep) #amount of rights
+observed_sum <- sum(data_for_stan$h)
 
-ppc_prior_ggplot <- ggplot(draws_gq, aes(x = prior_preds)) +
-  # Draw the histogram of the model's prior predictions (light red)
+ppc_prior_ggplot <- ggplot(tibble(Replicated_Sum = prior_rep_sums), 
+                           aes(x = Replicated_Sum)) +
   geom_histogram(fill = "#ffbaba", color = "#ff5252", bins = 30, alpha = 0.8) +
-  
-  # Add the vertical line for the actual observed data (dark red)
   geom_vline(xintercept = observed_sum, color = "darkred", linewidth = 1.2) +
-  
-  # Labels and theming
   ggtitle("Prior Predictive Check: Total 'Right' Choices") +
   xlab(paste("Total Number of 'Right' Choices (out of", trials, "trials)")) +
   ylab("Frequency") +
   theme_classic()
 
 ppc_prior_ggplot
+#note: we only have one observed sum
 ```
 
 #posterior predective checks 
@@ -323,10 +321,10 @@ ppc_posterior_ggplot <- ggplot(ppc_df, aes(x = Replicated_Sum)) +
 
 ppc_posterior_ggplot
 ```
-# uh oh that doesn't look good 
+#extreme right/left values because WSLS tends to stay a bunch or shift a bunch (depending on the value of the win_stay and lose_shift) --> trends towards extremes
 ```{r}
 ppc_overlay_df <- tibble(
-  Replicated_Sum = c(draws_gq$prior_preds, post_rep_sums),
+  Replicated_Sum = c(prior_rep_sums, post_rep_sums),
   Distribution = factor(
     rep(c("Prior Predictive", "Posterior Predictive"), each = length(post_rep_sums)),
     levels = c("Prior Predictive", "Posterior Predictive")
@@ -357,7 +355,9 @@ ppc_overlay_ggplot <- ggplot(ppc_overlay_df, aes(x = Replicated_Sum, fill = Dist
   )
 
 print(ppc_overlay_ggplot)
+#extremes because WSLS tends to repeat choices, so a lot of left choices, or a lot of right choices
 ```
+
 ```{r}
 # --- Example of checking another statistic (e.g., max run length) ---
 # Define a function to calculate the maximum run length in a vector

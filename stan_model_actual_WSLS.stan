@@ -30,6 +30,7 @@ model {
   // Priors
   target += beta_lpdf(win_stay   | 1, 1);
   target += beta_lpdf(lose_shift | 1, 1);
+  // uninformative: we can end up with very high or low win_stay, and very high or low lose_shift
 
   // Likelihood: start at trial 2 (no previous outcome for trial 1)
   for (t in 2:n) {
@@ -44,21 +45,21 @@ model {
 }
 //    the last bit, for getting the posteriors etc
 generated quantities {
-  real<lower=0, upper=1> ws_prior;
-  real<lower=0, upper=1> ws_posterior;
+  real<lower=0, upper=1> ws_prior = beta_rng(1, 1);
+  real<lower=0, upper=1> ls_prior = beta_rng(1, 1);
   
   array[n] int prior_preds;
   array[n] int posterior_preds;
-  
-  ws_prior = inv_logit(normal_rng(0,1));
-  ws_posterior = win_stay;          
   
   prior_preds[1]     = bernoulli_rng(0.5);
   posterior_preds[1] = bernoulli_rng(0.5);
   
   for (t in 2:n) {
-    prior_preds[t]     = bernoulli_rng(ws_prior);
-    posterior_preds[t] = bernoulli_rng(ws_posterior);
+    int stay_prior    = bernoulli_rng(feedback[t-1] ? ws_prior    : 1 - ls_prior);
+    int stay_post     = bernoulli_rng(feedback[t-1] ? win_stay    : 1 - lose_shift);
+    
+    prior_preds[t]     = stay_prior ? prior_preds[t-1]     : 1 - prior_preds[t-1];
+    posterior_preds[t] = stay_post  ? posterior_preds[t-1] : 1 - posterior_preds[t-1];
   }
 }
 
