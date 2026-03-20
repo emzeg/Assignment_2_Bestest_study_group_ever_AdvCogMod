@@ -503,5 +503,5 @@ ggplot(ppc_loseshift, aes(x = Lose_shift, fill = Distribution)) +
   )
 ```
 ```
-#it overestimates winstay & underestimates loseshift: this is because of noise & the values "trading off"
-#but why are these plots... identical???
+#it overestimates winstay & underestimates loseshift: this is because of noise & the values "trading off"????
+#but why are these plots... identical??? (maybe recheck the model? or the simulation? or the plots?)
