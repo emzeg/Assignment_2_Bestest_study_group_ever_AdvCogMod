@@ -4,6 +4,7 @@ output: html_document
 date: "2026-02-27"
 ---
 
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 set.seed(1234)
@@ -66,18 +67,13 @@ Simulate_WSLS_agent_noise_f <- function(noise, opponent, trials = 120) {
   choices[1] <- rbinom(1, 1, 0.5)
 
   for (t in 2:trials) {
-      #get feedback from the opponent
-      if (opponent[t-1] == choices[t-1]) {
-        feedback = 1
-      } else {
-        feedback = 0
-      }
-      #use the single function to generate data
-      #prevChoice, feedback, noise
-      choices[t] <- WSLSAgent_noise_f(choices[t - 1], feedback, noise)
-      #cat(feedback, "(feedback) is this making sense?", choices[t-1], "is prevchoice,", opponent[t-1], "is prev_opponent\n")
-      }
-    return (choices)
+    feedback[t - 1] <- as.integer(opponent[t - 1] == choices[t - 1])
+    choices[t] <- WSLSAgent_noise_f(choices[t - 1], feedback[t - 1], noise)
+  }
+  # Fill in the last trial's feedback
+  feedback[trials] <- as.integer(opponent[trials] == choices[trials])
+  
+  return(list(choices = choices, feedback = feedback))
 }
 ```
 
@@ -104,14 +100,15 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
   # Use map_dfr for efficient simulation across parameters
   d <- pmap_dfr(param_grid, function(noise) {
   # Simulate choices for one agent/condition (do in full since need feedback)
-  choices <- Simulate_WSLS_agent_noise_f(noise, opponent, trials)
+  result <- Simulate_WSLS_agent_noise_f(noise, opponent, trials)
   
   # Create tibble for this condition
   tibble(
-    trial = 1:trials,
-    WSLS_choice = choices,
-    true_noise = noise,
-    opponent_choices = opponent, #so we can compare it to the opponent's choices
+    trial            = 1:trials,
+    WSLS_choice      = result$choices,
+    feedback         = result$feedback,
+    true_noise       = noise,
+    opponent_choices = opponent,
   )
 }) %>%
   # Calculate cumulative rate for visualization
@@ -135,10 +132,10 @@ if (regenerate_simulations || !file.exists(sim_data_file)) {
 # Subset data for one specific agent simulation (rate=0.8, noise=0)
 d1 <- d %>% filter(true_noise == 0.0) # Make sure noise level matches
 
-# Stan requires data in a list format
 data_for_stan <- list(
-  n = trials,     # Number of trials (integer)
-  h = d1$WSLS_choice   # Vector of choices (0s and 1s) for this agent
+  n        = trials, # Number of trials (integer)
+  h        = d1$WSLS_choice, # Vector of choices (0s and 1s) for this agent
+  feedback = d1$feedback      #feedback
 )
 
 str(data_for_stan) # Show the structure of the list
@@ -291,7 +288,6 @@ ppc_prior_ggplot
 ```
 
 #posterior predective checks 
-
 ```{r}
 # Extract posterior predictive simulations from the fitted object
 # This matrix has dimensions: [number_of_draws, number_of_trials]
@@ -328,7 +324,6 @@ ppc_posterior_ggplot <- ggplot(ppc_df, aes(x = Replicated_Sum)) +
 ppc_posterior_ggplot
 ```
 # uh oh that doesn't look good 
-
 ```{r}
 ppc_overlay_df <- tibble(
   Replicated_Sum = c(draws_gq$prior_preds, post_rep_sums),
@@ -378,12 +373,14 @@ observed_max_run <- max_run_length(data_for_stan$h)
 
 # 3. Extract prior replicated matrices and compute T(y_rep) for the prior
 # h_prior_rep is an S x N matrix generated from the prior distributions
-h_prior_rep <- fit_gq$draws("h_prior_rep", format = "matrix")
+#h_prior_rep <- fit_gq$draws("h_prior_rep", format = "matrix")
+h_prior_rep <- fit_bernoulli$draws("prior_preds", format = "matrix")
 prior_max_runs <- apply(h_prior_rep, 1, max_run_length)
 
 # 4. Extract posterior replicated matrices and compute T(y_rep) for the posterior
 # h_post_rep is an S x N matrix generated from the posterior distributions
-h_post_rep <- fit_gq$draws("h_post_rep", format = "matrix")
+#h_post_rep <- fit_gq$draws("h_post_rep", format = "matrix") #what is fit_gq??
+h_post_rep <- fit_bernoulli$draws("posterior_preds", format = "matrix")
 post_max_runs <- apply(h_post_rep, 1, max_run_length)
 
 # 5. Bundle into a strictly structured tibble for overlay plotting
