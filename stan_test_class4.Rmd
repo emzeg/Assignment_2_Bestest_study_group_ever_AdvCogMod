@@ -39,12 +39,13 @@ trials <- 120 # Number of trials per simulated agent
 
 # Define the agent function (copied from previous chapter)
 WSLSAgent_noise_f <- function(prevChoice, feedback, noise, win_stay = 0.7, lose_shift = 0.9){
-  #win_stay and lose_shift
-  if (feedback == 1 && runif(1) < win_stay) {
-    choice = prevChoice
+   if (feedback == 1) {
+    # Win: stay with prob win_stay, otherwise shift
+    choice <- ifelse(runif(1) < win_stay, prevChoice, 1 - prevChoice)
   } else {
-    choice <- ifelse(runif(1) < lose_shift, 1 - prevChoice, prevChoice) #if not win, do this
-    }
+    # Loss: shift with prob lose_shift, otherwise stay
+    choice <- ifelse(runif(1) < lose_shift, 1 - prevChoice, prevChoice)
+  }
   
   if (noise > 0 && rbinom(1, 1, noise) == 1) { #if noise, override with 50/50
     choice <- rbinom(1, 1, 0.5)
@@ -503,5 +504,3 @@ ggplot(ppc_loseshift, aes(x = Lose_shift, fill = Distribution)) +
   )
 ```
 ```
-#it overestimates winstay & underestimates loseshift: this is because of noise & the values "trading off"????
-#but why are these plots... identical??? (maybe recheck the model? or the simulation? or the plots?)
