@@ -8,6 +8,7 @@ date: "2026-03-20"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#load packages
 ```{r}
 pacman::p_load(
   tidyverse, # Data manipulation and plotting
@@ -19,16 +20,241 @@ pacman::p_load(
   furrr,        # Parallel processing
   future        # Future backend
 )
+```
 
-# Parallel Setup: Leave 2 cores free for system stability
-n_cores <- parallel::detectCores() - 2
-plan(multisession, workers = n_cores)
+#create the data (vars, basic model logic)
+#repeated from stan_assignment2 (Param recovery will actually use all the alternative values)
+```{r}
+trials <- 120 # Number of trials per simulated agent
 
-# Optional: Set a default ggplot theme
-theme_set(theme_classic())
+# Define the agent function (copied from previous chapter)
+WSLSAgent_noise_f <- function(prevChoice, feedback, noise, win_stay, lose_shift){
+   if (feedback == 1) {
+    # Win: stay with prob win_stay, otherwise shift
+    choice <- ifelse(runif(1) < win_stay, prevChoice, 1 - prevChoice)
+  } else {
+    # Loss: shift with prob lose_shift, otherwise stay
+    choice <- ifelse(runif(1) < lose_shift, 1 - prevChoice, prevChoice)
+  }
+  
+  if (noise > 0 && rbinom(1, 1, noise) == 1) { #if noise, override with 50/50
+    choice <- rbinom(1, 1, 0.5)
+  }
+  return(choice)
+}
+
+RandomAgent_f <- function(rate){
+  choice <- rbinom(1, 1, rate)
+  return(choice)
+}
+```
+
+#create the data 2 (WSLS function for simulation)
+#repeated from stan_assignment2
+```{r}
+#simulate the wsls agent separately (to have the feedback and such)
+Simulate_WSLS_agent_noise_f <- function(noise, opponent, trials = 120, win_stay, lose_shift) {
+  choices  <- integer(trials)
+  feedback <- integer(trials)
+  
+  #first is random
+  choices[1] <- rbinom(1, 1, 0.5)
+
+  for (t in 2:trials) {
+    feedback[t - 1] <- as.integer(opponent[t - 1] == choices[t - 1])
+    choices[t] <- WSLSAgent_noise_f(choices[t - 1], feedback[t - 1], noise, win_stay, lose_shift)
+  }
+  # Fill in the last trial's feedback
+  feedback[trials] <- as.integer(opponent[trials] == choices[trials])
+  
+  return(list(choices = choices, feedback = feedback))
+}
+```
+
+#param recovery!!!
+```{r}
+# 1. Define the parameter grid
+recovery_grid <- tidyr::expand_grid(
+  n_trials   = c(30, 60, 120, 240), #our data only goes up to 120
+  true_ws    = c(0.3, 0.5, 0.7, 0.9),  # win_stay values (4 different possible hardcoded values)
+  true_ls    = c(0.3, 0.5, 0.7, 0.9)   # lose_shift values (4 different possible hardcoded values)
+  #noise is not part of our model afaik
+)
+
+#T/F to force run the recovery
+regenerate_simulations <- TRUE
+
+#define path for recovery file
+stan_results_dir <- "simmodels"
+recovery_file <- (here(stan_results_dir,"WSLS_recovery_draws.rds"))
+
+#define path for model file & saved fitted model
+stan_file_bernoulli <- here("stan_model_actual_WSLS.stan")
+model_file_bernoulli <- here(stan_results_dir, "stan_model_actual_WSLS.stan")
+
+# 2. Define the isolated recovery pipeline
+if (regenerate_simulations || !file.exists(recovery_file)) {
+
+  run_recovery <- function(n_trials, true_ws, true_ls) {
+    
+    # Generate synthetic empirical data
+    opponent <- purrr::map_int(1:n_trials, ~RandomAgent_f(rate = 0.5))
+    result   <- Simulate_WSLS_agent_noise_f(noise = 0, opponent = opponent, trials = n_trials, lose_shift = true_ls, win_stay = true_ws)
+
+  mod_bernoulli <- cmdstan_model(stan_file_bernoulli,
+                                 cpp_options = list(stan_threads = FALSE),
+                                 stanc_options = list("O1"))
+    
+    # Structure the data block for Stan
+    rec_data_list <- list(
+      n        = n_trials,
+      h        = result$choices,
+      feedback = result$feedback
+    )
+    
+    # Fit the generative model
+    fit <- mod_bernoulli$sample(
+      data            = rec_data_list,
+      chains          = 1,
+      iter_warmup     = 1000,
+      iter_sampling   = 2000,
+      refresh         = 0,
+      show_messages   = FALSE
+    )
+    
+    # Extract structural draws immediately to avoid temporary file fragility
+    draws_df <- fit$draws(c("win_stay", "lose_shift"), format = "df")
+    
+    tibble::tibble(
+      trials   = n_trials,
+      true_ws  = true_ws,
+      true_ls  = true_ls,
+      win_stay  = draws_df$win_stay,
+      lose_shift = draws_df$lose_shift
+    )
+  }
+  
+  # 3. Establish the parallel backend and execute mapping
+  future::plan(future::multisession, workers = 2)
+  
+  recovery_draws <- furrr::future_pmap(
+    recovery_grid,
+    run_recovery,
+    .options = furrr::furrr_options(seed = TRUE, stdout = FALSE)
+  ) |>
+    dplyr::bind_rows()
+  
+  future::plan(future::sequential)
+  saveRDS(recovery_draws, recovery_file)
+
+} else {
+  recovery_draws <- readRDS(recovery_file)
+}
+
 ```
 
 ```{r}
+# 4. Compress draws into rigorous posterior summaries
+recovery_summary <- recovery_draws |>
+  dplyr::group_by(trials, true_ws, true_ls) |>
+  dplyr::summarize(
+    ws_mean     = mean(win_stay),
+    ws_lower_95 = quantile(win_stay, 0.025),
+    ws_upper_95 = quantile(win_stay, 0.975),
+    ls_mean     = mean(lose_shift),
+    ls_lower_95 = quantile(lose_shift, 0.025),
+    ls_upper_95 = quantile(lose_shift, 0.975),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(
+    ws_label = paste0("True win-stay: ", true_ws),
+    ls_label = paste0("True lose-shift: ", true_ls)
+  )
 
+# 5. Visualize the geometric shrinkage across the parameter space
+#winstay
+p_ws <- ggplot(recovery_summary, aes(x = factor(trials), y = ws_mean)) +
+  geom_hline(aes(yintercept = true_ws), color = "black", linetype = "dashed", linewidth = 1) +
+  geom_pointrange(
+    aes(ymin = ws_lower_95, ymax = ws_upper_95, color = factor(true_ws)),
+    linewidth = 1, size = 0.8
+  ) +
+  facet_wrap(~ ws_label) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  ggtitle("Param Recovery: Win-Stay") +
+  xlab("Number of Trials (N)") +
+  ylab("Posterior Estimate of Win-Stay (Mean & 95% CrI)") +
+  coord_cartesian(ylim = c(0.1, 1.0)) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    strip.background = element_rect(fill = "gray95", color = NA),
+    strip.text       = element_text(face = "bold", size = 11),
+    panel.grid.major.y = element_line(color = "gray90", linetype = "dotted")
+  )
+
+#loseshift
+p_ls <- ggplot(recovery_summary, aes(x = factor(trials), y = ls_mean)) +
+  geom_hline(aes(yintercept = true_ls), color = "black", linetype = "dashed", linewidth = 1) +
+  geom_pointrange(
+    aes(ymin = ls_lower_95, ymax = ls_upper_95, color = factor(true_ls)),
+    linewidth = 1, size = 0.8
+  ) +
+  facet_wrap(~ ls_label) +
+  scale_color_viridis_d(option = "rocket", begin = 0.2, end = 0.8) +
+  ggtitle("Param Recovery: Lose-Shift") +
+  xlab("Number of Trials (N)") +
+  ylab("Posterior Estimate of Lose-switch (Mean & 95% CrI)") +
+  coord_cartesian(ylim = c(0.1, 1.0)) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    strip.background = element_rect(fill = "gray95", color = NA),
+    strip.text       = element_text(face = "bold", size = 11),
+    panel.grid.major.y = element_line(color = "gray90", linetype = "dotted")
+  )
+
+gridExtra::grid.arrange(p_ws, p_ls, ncol = 2, nrow = 1, widths = c(1, 1))
+```
+
+```{r}
+# Win-Stay identity plot
+p_ws_alt <- ggplot(recovery_summary, aes(x = true_ws, y = ws_mean)) +
+  geom_abline(intercept = 0, slope = 1, color = "black", linetype = "dashed", linewidth = 1) +
+  geom_pointrange(aes(ymin = ws_lower_95, ymax = ws_upper_95, color = factor(true_ws)),
+                  linewidth = 1, size = 0.8) +
+  facet_wrap(~ trials, labeller = as_labeller(function(x) paste0(x, " Trials"))) +
+  scale_color_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
+  coord_fixed(xlim = c(0.1, 1.0), ylim = c(0.1, 1.0)) +
+  ggtitle("Param Recovery: Win-Stay") +
+  xlab("Generative Ground Truth") +
+  ylab("Posterior Estimate: Mean & 95% CrI") +
+  theme(
+    legend.position    = "none",
+    strip.background   = element_rect(fill = "gray95", color = NA),
+    strip.text         = element_text(face = "bold", size = 11),
+    panel.grid.major   = element_line(color = "gray90", linetype = "dotted")
+  )
+
+# Lose-Shift identity plot
+p_ls_alt <- ggplot(recovery_summary, aes(x = true_ls, y = ls_mean)) +
+  geom_abline(intercept = 0, slope = 1, color = "black", linetype = "dashed", linewidth = 1) +
+  geom_pointrange(aes(ymin = ls_lower_95, ymax = ls_upper_95, color = factor(true_ls)),
+                  linewidth = 1, size = 0.8) +
+  facet_wrap(~ trials, labeller = as_labeller(function(x) paste0(x, " Trials"))) +
+  scale_color_viridis_d(option = "rocket", begin = 0.2, end = 0.8) +
+  coord_fixed(xlim = c(0.1, 1.0), ylim = c(0.1, 1.0)) +
+  ggtitle("Param Recovery: Lose-Shift") +
+  xlab("Generative Ground Truth") +
+  ylab("Posterior Estimate: Mean & 95% CrI)") +
+  theme(
+    legend.position    = "none",
+    strip.background   = element_rect(fill = "gray95", color = NA),
+    strip.text         = element_text(face = "bold", size = 11),
+    panel.grid.major   = element_line(color = "gray90", linetype = "dotted")
+  )
+
+#combined
+gridExtra::grid.arrange(p_ws_alt, p_ls_alt, ncol = 2, nrow = 1, widths = c(1, 1))
 ```
 

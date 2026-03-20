@@ -8,6 +8,8 @@
 //    http://mc-stan.org/users/interfaces/rstan.html
 //    https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started
 //
+// real<lower=0, upper=1> noise; //should noise be part of the model? or can we assume that it's unavoidable (but not part of the "data generation" process?
+
 
 // The input data is a vector 'y' of length 'N'.
 data {
