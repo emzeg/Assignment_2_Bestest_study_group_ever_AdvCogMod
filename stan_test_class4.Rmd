@@ -444,8 +444,6 @@ ggplot(ppc_winstay, aes(x = Win_stay, fill = Distribution)) +
   scale_fill_manual(values = c("Prior Predictive" = "#ffbaba", "Posterior Predictive" = "skyblue")) +
   ggtitle("Win_Stay: Prior vs. Posterior Predictive Checks") +
   xlab(paste("Win_stay prior & posterior compared")) +
-  #ylab("Frequency (Replicated Datasets)") +
-  # Add annotation for the empirical ground truth +
   theme_classic() +
   theme(
     legend.position = "bottom", 
@@ -463,4 +461,47 @@ ggplot(ppc_winstay, aes(x = Win_stay, fill = Distribution)) +
     fontface = "bold"
   )
 ```
+#loseShift
+```{r}
+#prior & posteriors again
+ls_prior <- fit_bernoulli$draws("ls_prior", format = "matrix")
+ls_posterior <- fit_bernoulli$draws("lose_shift", format = "matrix")
+#get the real winstay (in this case known, and only one val)
+lose_shift_real = 0.9
 
+ppc_loseshift <- tibble(
+  Lose_shift = c(ls_prior, ls_posterior),
+  Distribution = factor(
+    rep(c("Prior Predictive", "Posterior Predictive"), each = length(ls_prior)),
+    levels = c("Prior Predictive", "Posterior Predictive")
+  )
+)
+
+# 2. Generate the overlay plot
+ggplot(ppc_loseshift, aes(x = Lose_shift, fill = Distribution)) +
+  # Use position = "identity" and alpha to ensure both distributions are visible
+  geom_histogram(position = "identity", alpha = 0.6, color = "white", bins = 30) +
+  geom_vline(xintercept = lose_shift_real, color = "black", linetype = "dashed", linewidth = 1) +
+  scale_fill_manual(values = c("Prior Predictive" = "#ffbaba", "Posterior Predictive" = "skyblue")) +
+  ggtitle("Lose_shift: Prior vs. Posterior Predictive Checks") +
+  xlab(paste("Lose_shift prior & posterior compared")) +
+  theme_classic() +
+  theme(
+    legend.position = "bottom", 
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12)
+  ) +
+  annotate(
+    "text",
+    x = lose_shift_real-0.3,
+    y = Inf,
+    label = "Empirical Lose_shift",
+    vjust = 2,
+    hjust = -0.1,
+    size = 4,
+    fontface = "bold"
+  )
+```
+```
+#it overestimates winstay & underestimates loseshift: this is because of noise & the values "trading off"
+#but why are these plots... identical???
